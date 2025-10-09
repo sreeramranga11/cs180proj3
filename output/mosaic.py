@@ -19,12 +19,12 @@ class FeatherBlendStrategy(ABC):
 
     @abstractmethod
     def compute_weights(self, mask: np.ndarray) -> np.ndarray:
-        # return blending weights given binary mask
+        '''return blending weights given binary mask'''
 
 
 @dataclass
 class LinearFeatherBlendStrategy(FeatherBlendStrategy):
-    # inear feathering from image center to boundaries
+    # Linear feathering from image center to boundaries
 
     def compute_weights(self, mask: np.ndarray) -> np.ndarray:
         if mask.ndim != 2:
