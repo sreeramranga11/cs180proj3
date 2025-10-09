@@ -1,0 +1,9 @@
+{
+  "dataset": "bedroom",
+  "reference": "bedroom2.jpg",
+  "additional_images": [
+    "bedroom1.jpg",
+    "bedroom3.jpg"
+  ],
+  "mosaic_path": "deliverables/mosaics/bedroom_mosaic.png"
+}

@@ -20,6 +20,8 @@ from .io_utils import (
     CorrespondenceIO,
 )
 from .debug import DebugLogger
+from .feature_matching import FeatureMatcher, save_correspondences, visualize_correspondences
+from .auto_rectify import AutomaticRectifier
 
 __all__ = [
     "compute_homography",
@@ -41,4 +43,8 @@ __all__ = [
     "CorrespondenceSet",
     "CorrespondenceIO",
     "DebugLogger",
+    "FeatureMatcher",
+    "save_correspondences",
+    "visualize_correspondences",
+    "AutomaticRectifier",
 ]

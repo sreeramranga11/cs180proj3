@@ -9,6 +9,25 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 
+def _json_default(value: Any) -> Any:
+    # Convert non-standard types like numpy scalars, paths, and sets into JSON safe data
+
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        np = None
+    if np is not None:
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, set):
+        return list(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 @dataclass
 class DebugLogger:
     #Writes debug info and artifacts to disk. Supports custom root and context metadata
@@ -28,7 +47,7 @@ class DebugLogger:
         # Keep the JSON dumps tidy so they are easy to read in a text editor.
         path = self.root / filename
         with path.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+            json.dump(data, f, indent=2, sort_keys=True, default=_json_default)
         return path
 
     def log(self, message: str, **metadata: Any) -> Path:

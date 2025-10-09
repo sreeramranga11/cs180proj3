@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence, Tuple
 
 import numpy as np
@@ -69,7 +69,7 @@ class MosaicImage:
 class MosaicBuilder:
     reference_shape: Tuple[int, int, int]
     logger: DebugLogger | None = None
-    blend_strategy: FeatherBlendStrategy = LinearFeatherBlendStrategy()
+    blend_strategy: FeatherBlendStrategy = field(default_factory=LinearFeatherBlendStrategy)
 
     def _initialize_canvas(self, reference_image: ArrayLike) -> MosaicImage:
         height, width = reference_image.shape[:2]
@@ -119,33 +119,41 @@ class MosaicBuilder:
         warped_shape: Tuple[int, int, int] | Tuple[int, int],
         warped_origin: Tuple[int, int],
     ) -> MosaicImage:
-        h = canvas.image.shape[0]
-        w = canvas.image.shape[1]
+        h, w = canvas.image.shape[:2]
         offset_x, offset_y = canvas.offset
+
+        global_min_x = -offset_x
+        global_min_y = -offset_y
+        global_max_x = global_min_x + w - 1
+        global_max_y = global_min_y + h - 1
 
         warped_height, warped_width = warped_shape[:2]
         min_x, min_y = warped_origin
         max_x = min_x + warped_width - 1
         max_y = min_y + warped_height - 1
 
-        new_min_x = min(0, min_x + offset_x)
-        new_min_y = min(0, min_y + offset_y)
-        new_max_x = max(w - 1, max_x + offset_x)
-        new_max_y = max(h - 1, max_y + offset_y)
+        new_global_min_x = min(global_min_x, min_x)
+        new_global_min_y = min(global_min_y, min_y)
+        new_global_max_x = max(global_max_x, max_x)
+        new_global_max_y = max(global_max_y, max_y)
 
-        new_width = new_max_x - new_min_x + 1
-        new_height = new_max_y - new_min_y + 1
-
-        if new_width == w and new_height == h and new_min_x == 0 and new_min_y == 0:
+        if (
+            new_global_min_x == global_min_x
+            and new_global_min_y == global_min_y
+            and new_global_max_x == global_max_x
+            and new_global_max_y == global_max_y
+        ):
             return canvas
 
-        # Allocate a larger canvas and copy the existing mosaic into place.
-        expanded_image = np.zeros((new_height, new_width, canvas.image.shape[2]))
-        expanded_mask = np.zeros((new_height, new_width), dtype=bool)
-        expanded_weights = np.zeros((new_height, new_width), dtype=np.float64)
+        new_width = new_global_max_x - new_global_min_x + 1
+        new_height = new_global_max_y - new_global_min_y + 1
 
-        start_x = offset_x - new_min_x
-        start_y = offset_y - new_min_y
+        expanded_image = np.zeros((new_height, new_width, canvas.image.shape[2]), dtype=canvas.image.dtype)
+        expanded_mask = np.zeros((new_height, new_width), dtype=bool)
+        expanded_weights = np.zeros((new_height, new_width), dtype=canvas.weights.dtype)
+
+        start_x = global_min_x - new_global_min_x
+        start_y = global_min_y - new_global_min_y
 
         expanded_image[start_y:start_y + h, start_x:start_x + w] = canvas.image
         expanded_mask[start_y:start_y + h, start_x:start_x + w] = canvas.mask
@@ -154,7 +162,7 @@ class MosaicBuilder:
         canvas.image = expanded_image
         canvas.mask = expanded_mask
         canvas.weights = expanded_weights
-        canvas.offset = (-new_min_x, -new_min_y)
+        canvas.offset = (-new_global_min_x, -new_global_min_y)
         return canvas
 
     def _paste(
