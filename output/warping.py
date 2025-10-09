@@ -81,6 +81,7 @@ def compute_warp_bounds(
     #Compute a bounded output region for warping to limit memory usage. keeps crashing
 
     height, width = image_shape[:2]
+    margin_specified = margin is not None
     if margin is None:
         margin = int(max(height, width) * 0.75)
     if max_extent is None:
@@ -95,6 +96,9 @@ def compute_warp_bounds(
     region_width = base_width
     region_height = base_height
 
+    width_limit = min(base_width, max_extent)
+    height_limit = min(base_height, max_extent)
+
     if sample_points is not None and sample_points.size > 0:
         warped = apply_homography(sample_points, H)
         valid = np.isfinite(warped).all(axis=1)
@@ -107,8 +111,13 @@ def compute_warp_bounds(
             center_x = float(region[:, 0].mean())
             center_y = float(region[:, 1].mean())
 
-    width_limit = min(base_width, max_extent)
-    height_limit = min(base_height, max_extent)
+            if not margin_specified:
+                region_extent = float(np.hypot(region_width, region_height))
+                tight_margin = max(int(region_extent * 1.15), 150)
+                margin = min(margin, tight_margin)
+
+            width_limit = min(width_limit, int(region_width + 2 * margin))
+            height_limit = min(height_limit, int(region_height + 2 * margin))
 
     width_needed = int(region_width + 2 * margin)
     height_needed = int(region_height + 2 * margin)

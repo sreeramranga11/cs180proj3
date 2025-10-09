@@ -7,7 +7,7 @@ from typing import Sequence, Tuple
 import numpy as np
 
 from .debug import DebugLogger
-from .homography import compute_homography
+from .homography import apply_homography, compute_homography
 from .io_utils import CorrespondenceSet
 from .warping import compute_warp_bounds, warp_image_bilinear
 
@@ -98,6 +98,7 @@ class MosaicBuilder:
             # Warp into the reference frame so we can blend directly.
             bounds = compute_warp_bounds(image.shape, H, sample_points=corr.points_a)
             warped, mask, (min_x, min_y) = warp_image_bilinear(image, H, bounds=bounds)
+            mask = self._apply_overlap_constraint(mask, corr, H, (min_x, min_y))
             weights = self.blend_strategy.compute_weights(mask)
 
             canvas = self._expand_canvas(canvas, warped.shape, (min_x, min_y))
@@ -195,6 +196,159 @@ class MosaicBuilder:
         result = canvas.image / (canvas.weights[..., None] + epsilon)
         result[~canvas.mask] = 0
         return result
+
+    def _apply_overlap_constraint(
+        self,
+        mask: np.ndarray,
+        correspondences: CorrespondenceSet,
+        H: np.ndarray,
+        origin: Tuple[int, int],
+    ) -> np.ndarray:
+        """Limit the warped contribution to the region supported by correspondences."""
+
+        if correspondences.count < 3:
+            return mask
+
+        warped_points = apply_homography(correspondences.points_a, H)
+        valid = np.isfinite(warped_points).all(axis=1)
+        warped_points = warped_points[valid]
+        if warped_points.shape[0] < 3:
+            return mask
+
+        hull = _convex_hull(warped_points)
+        if hull.shape[0] < 3:
+            return mask
+
+        expanded_hull = _expand_polygon(hull, mask.shape)
+        rect_mask = _rectangular_mask(mask.shape, origin, expanded_hull)
+        polygon_mask = _polygon_mask(mask.shape, origin, expanded_hull)
+        combined_mask = rect_mask | polygon_mask
+        if not combined_mask.any():
+            return mask
+        return mask & combined_mask
+
+
+def _convex_hull(points: np.ndarray) -> np.ndarray:
+    """Compute the convex hull of a set of 2D points using the monotonic chain."""
+
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.shape[0] < 3:
+        return pts
+
+    # Sort lexicographically (y first to stabilize vertical structures).
+    order = np.lexsort((pts[:, 0], pts[:, 1]))
+    sorted_pts = pts[order]
+
+    def cross(o: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[np.ndarray] = []
+    for p in sorted_pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    upper: list[np.ndarray] = []
+    for p in reversed(sorted_pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    hull = np.vstack((lower[:-1], upper[:-1]))
+    return hull
+
+
+def _expand_polygon(polygon: np.ndarray, mask_shape: Tuple[int, int]) -> np.ndarray:
+    # Expand polygon radially to admit nearby regions when masking
+
+    if polygon.shape[0] < 3:
+        return polygon
+
+    height, width = mask_shape
+    extent = np.ptp(polygon, axis=0)
+    extent_x = max(float(extent[0]), 1.0)
+    extent_y = max(float(extent[1]), 1.0)
+
+    ratio_x = width / extent_x
+    ratio_y = height / extent_y
+    ratio = max(ratio_x, ratio_y)
+
+    expansion_cap = 8.0
+    expansion_factor = min(expansion_cap, max(1.5, ratio * 1.15))
+
+    center = polygon.mean(axis=0, keepdims=True)
+    offsets = polygon - center
+    expanded = center + offsets * expansion_factor
+
+    max_extent = max(extent_x, extent_y)
+    padding = max_extent * 0.35 + 40.0
+    max_padding = max(height, width) * 0.5
+    padding = float(min(padding, max_padding))
+
+    norms = np.linalg.norm(offsets, axis=1, keepdims=True)
+    safe_norms = np.where(norms > 1e-6, norms, 1.0)
+    expanded += offsets * (padding / safe_norms)
+    return expanded
+
+
+def _rectangular_mask(shape: Tuple[int, int], origin: Tuple[int, int], polygon: np.ndarray) -> np.ndarray:
+    # Create axis aligned mask that bounds polygon
+
+    height, width = shape
+    mask = np.zeros((height, width), dtype=bool)
+    if polygon.shape[0] < 1:
+        mask[:] = True
+        return mask
+
+    min_corner = polygon.min(axis=0)
+    max_corner = polygon.max(axis=0)
+
+    origin_x, origin_y = origin
+    x0 = int(np.floor(min_corner[0] - origin_x))
+    y0 = int(np.floor(min_corner[1] - origin_y))
+    x1 = int(np.ceil(max_corner[0] - origin_x))
+    y1 = int(np.ceil(max_corner[1] - origin_y))
+
+    x0 = max(0, min(width, x0))
+    y0 = max(0, min(height, y0))
+    x1 = max(0, min(width, x1))
+    y1 = max(0, min(height, y1))
+
+    if x1 > x0 and y1 > y0:
+        mask[y0:y1, x0:x1] = True
+    return mask
+
+
+def _polygon_mask(shape: Tuple[int, int], origin: Tuple[int, int], polygon: np.ndarray) -> np.ndarray:
+    """Rasterize a polygon into a boolean mask anchored at the provided origin."""
+
+    height, width = shape
+    if polygon.shape[0] < 3:
+        return np.ones((height, width), dtype=bool)
+
+    min_x, min_y = origin
+    poly = polygon - np.array([min_x, min_y], dtype=np.float64)
+
+    xs = np.arange(width, dtype=np.float64)[None, :]
+    ys = np.arange(height, dtype=np.float64)[:, None]
+
+    inside = np.zeros((height, width), dtype=bool)
+    x0 = poly[:, 0]
+    y0 = poly[:, 1]
+    num_vertices = len(poly)
+
+    for i in range(num_vertices):
+        j = (i + 1) % num_vertices
+        xi, yi = x0[i], y0[i]
+        xj, yj = x0[j], y0[j]
+        # Ray casting: flip inside flag on edge crossings.
+        intersects = ((yi > ys) != (yj > ys)) & (
+            xs
+            < (xj - xi) * (ys - yi) / (yj - yi + 1e-12) + xi
+        )
+        inside ^= intersects
+
+    return inside
 
 
 __all__ = [
