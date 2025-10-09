@@ -4,6 +4,7 @@ from .warping import (
     warp_image_bilinear,
     compute_output_bounds,
     inverse_warp_coordinates,
+    compute_warp_bounds,
 )
 from .mosaic import (
     MosaicBuilder,
@@ -30,6 +31,7 @@ __all__ = [
     "warp_image_bilinear",
     "compute_output_bounds",
     "inverse_warp_coordinates",
+    "compute_warp_bounds",
     "MosaicBuilder",
     "FeatherBlendStrategy",
     "LinearFeatherBlendStrategy",

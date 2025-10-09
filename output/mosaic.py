@@ -9,7 +9,7 @@ import numpy as np
 from .debug import DebugLogger
 from .homography import compute_homography
 from .io_utils import CorrespondenceSet
-from .warping import warp_image_bilinear
+from .warping import compute_warp_bounds, warp_image_bilinear
 
 ArrayLike = np.ndarray
 
@@ -75,9 +75,9 @@ class MosaicBuilder:
         height, width = reference_image.shape[:2]
         # Start the mosaic using the reference image as-is.
         canvas = MosaicImage(
-            image=reference_image.astype(np.float64),
+            image=reference_image.astype(np.float32),
             mask=np.ones((height, width), dtype=bool),
-            weights=np.ones((height, width), dtype=np.float64),
+            weights=np.ones((height, width), dtype=np.float32),
             offset=(0, 0),
         )
         return canvas
@@ -96,7 +96,8 @@ class MosaicBuilder:
         for idx, (image, corr) in enumerate(zip(additional_images, correspondences)):
             H = compute_homography(corr)
             # Warp into the reference frame so we can blend directly.
-            warped, mask, (min_x, min_y) = warp_image_bilinear(image, H)
+            bounds = compute_warp_bounds(image.shape, H, sample_points=corr.points_a)
+            warped, mask, (min_x, min_y) = warp_image_bilinear(image, H, bounds=bounds)
             weights = self.blend_strategy.compute_weights(mask)
 
             canvas = self._expand_canvas(canvas, warped.shape, (min_x, min_y))

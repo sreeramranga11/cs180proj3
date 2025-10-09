@@ -79,8 +79,12 @@ def apply_homography(points: np.ndarray, H: np.ndarray) -> np.ndarray:
     homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
     mapped = (H @ homogeneous.T).T
     # Bring the coordinates back to Cartesian form via perspective divide.
-    mapped /= mapped[:, [2]]
-    return mapped[:, :2]
+    w = mapped[:, 2]
+    result = np.full((points.shape[0], 2), np.nan, dtype=np.float64)
+    valid = np.abs(w) > 1e-12
+    if np.any(valid):
+        result[valid] = mapped[valid, :2] / w[valid, None]
+    return result
 
 
 __all__ = [
