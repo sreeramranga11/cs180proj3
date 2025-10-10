@@ -1,9 +1,0 @@
-{
-  "dataset": "classroom",
-  "reference": "classroom2.jpg",
-  "additional_images": [
-    "classroom1.jpg",
-    "classroom3.jpg"
-  ],
-  "mosaic_path": "deliverables/mosaics/classroom_mosaic.png"
-}

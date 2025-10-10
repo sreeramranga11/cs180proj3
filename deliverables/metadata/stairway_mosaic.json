@@ -1,9 +1,0 @@
-{
-  "dataset": "stairway",
-  "reference": "stairway2.jpg",
-  "additional_images": [
-    "stairway1.jpg",
-    "stairway3.jpg"
-  ],
-  "mosaic_path": "deliverables/mosaics/stairway_mosaic.png"
-}

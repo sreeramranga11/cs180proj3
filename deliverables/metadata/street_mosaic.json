@@ -1,9 +1,0 @@
-{
-  "dataset": "street",
-  "reference": "street2.jpg",
-  "additional_images": [
-    "street1.jpg",
-    "street3.jpg"
-  ],
-  "mosaic_path": "deliverables/mosaics/street_mosaic.png"
-}
