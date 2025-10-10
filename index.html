@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CS 180 Project 3 · (Auto)stitching and Photo Mosaics</title>
+  <meta name="description" content="CS 180 Project 3 · (Auto)stitching and Photo Mosaics. Feature matching, homography estimation, inverse warping, rectification, and multi-image mosaics." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --surface: #ffffff;
+      --ink: #1b2430;
+      --muted: #64748b;
+      --border: #e6e9ef;
+      --accent: #2563eb;
+      --accent-2: #a855f7;
+      --chip: #eef2ff;
+      --radius: 16px;
+      --shadow: 0 10px 25px rgba(0, 22, 68, 0.08), 0 2px 8px rgba(0, 22, 68, 0.06);
+    }
+    html, body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      scroll-behavior: smooth;
+    }
+    a { color: #0f4fe6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .site-header { background: rgba(255,255,255,0.85); backdrop-filter: saturate(180%) blur(14px); }
+    .site-header .navbar-brand { font-weight: 800; letter-spacing: 0.18rem; text-transform: uppercase; }
+    .hero-gradient {
+      background: radial-gradient(1200px 500px at 15% -10%, #c7d2fe 0%, transparent 50%),
+                  radial-gradient(1200px 500px at 90% -15%, #f5d0fe 0%, transparent 50%);
+    }
+
+    .scroll-progress { position: fixed; top: 0; left: 0; width: 100%; height: 3px; z-index: 9999; }
+    .scroll-progress__bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+    .toc {
+      position: fixed; top: 92px; left: 16px; width: 240px;
+      max-height: calc(100vh - 120px); overflow: auto;
+      padding: 14px 14px 10px; border-radius: 12px; background: var(--surface);
+      border: 1px solid var(--border); box-shadow: var(--shadow);
+    }
+    .toc .title { font-size: .78rem; letter-spacing: .18em; text-transform: uppercase; color: #94a3b8; margin-bottom: 6px; }
+    .toc .nav-link { color: #6b7280; padding: .35rem .25rem; border-radius: 8px; position: relative; }
+    .toc .nav-link:hover { color: var(--ink); background: #f1f5ff; }
+    .toc .nav-link.active { color: var(--ink); font-weight: 600; }
+    .toc .nav-link::after {
+      content: ""; position: absolute; left: 0; bottom: -2px; height: 2px; width: var(--p, 0%);
+      background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; border-radius: 2px;
+    }
+
+    main { padding-left: 272px; }
+    @media (max-width: 992px) { .toc { display: none !important; } main { padding-left: 0; } }
+
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .panel .hd { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 700; }
+    .panel .bd { padding: 18px 20px; color: var(--ink); }
+
+    .chip { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .6rem; border-radius: 999px; background: var(--chip); border: 1px solid #dbe4ff; color: #344a84; font-size: .85rem; }
+    .chip i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+    .image-card { position: relative; overflow: hidden; border-radius: 14px; border: 1px solid var(--border); background: #fff; box-shadow: var(--shadow); transition: transform .35s ease; }
+    .image-card img { display: block; width: 100%; height: auto; transform: translateZ(0); transition: transform .35s ease; cursor: zoom-in; }
+    .image-card:hover { transform: translateY(-4px); }
+    .image-card:hover img { transform: scale(1.025); }
+    .overlay-text { position: absolute; left: .6rem; bottom: .6rem; background: rgba(255,255,255,.75); backdrop-filter: blur(3px); color: var(--ink); padding: .3rem .55rem; border-radius: .4rem; font-size: .85rem; border: 1px solid rgba(0,0,0,.06); }
+
+    .metric-badge { font-size: .78rem; background: #f5f7ff; border: 1px solid var(--border); color: #334155; }
+
+    pre.code { display: block; background: #0f172a; color: #f8fafc; border-radius: 12px; border: 1px solid #1e293b; padding: 14px 16px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: .9rem; }
+    code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: .9rem; }
+
+    .note { background: #eef2ff; border: 1px solid #dbe4ff; color: #364766; border-radius: 12px; padding: 16px; }
+    ul { padding-left: 1.1rem; }
+    .modal-image .modal-content { background: transparent; }
+    .modal-image .modal-body { background: transparent; }
+    .modal-image .btn-close { filter: invert(1); }
+    #image-modal-img { max-height: calc(90vh - 90px); object-fit: contain; }
+    .toc-section { font-size: .78rem; letter-spacing: .18em; text-transform: uppercase; color: #94a3b8; margin: 10px 0 6px; font-weight: 700; }
+    .nav-link.sub { padding-left: 1.2rem; font-size: .88em; }
+  </style>
+</head>
+<body data-bs-spy="scroll" data-bs-target="#toc-nav" data-bs-offset="100" tabindex="0">
+  <div class="scroll-progress"><div id="scroll-progress-bar" class="scroll-progress__bar"></div></div>
+
+  <header class="site-header border-bottom">
+    <nav class="navbar navbar-expand-lg navbar-light">
+      <div class="container">
+        <a class="navbar-brand" href="#overview">CS 180 Project 3</a>
+      </div>
+    </nav>
+  </header>
+
+  <aside id="toc" class="toc d-none d-lg-block" aria-label="Table of contents">
+    <div class="title fw-bold">Contents</div>
+    <nav id="toc-nav" class="nav flex-column small">
+      <div class="toc-section">Photo Mosaics</div>
+      <a class="nav-link" href="#overview">Overview</a>
+      <a class="nav-link" href="#a1-capture">A.1 Shoot &amp; Digitize</a>
+      <a class="nav-link" href="#a2-homographies">A.2 Recover Homographies</a>
+      <a class="nav-link" href="#a3-warping">A.3 Warp &amp; Rectify</a>
+      <a class="nav-link sub" href="#rectification-gallery">Rectification Examples</a>
+      <a class="nav-link" href="#a4-mosaics">A.4 Blend into Mosaics</a>
+      <a class="nav-link sub" href="#a4-street">Street Panorama</a>
+      <a class="nav-link sub" href="#a4-stairway">Stairway Panorama</a>
+      <a class="nav-link sub" href="#a4-classroom">Classroom Panorama</a>
+      <a class="nav-link" href="#diagnostics">Debug &amp; Diagnostics</a>
+      <a class="nav-link" href="#reproduce">Reproducing Results</a>
+      <a class="nav-link" href="#takeaways">Takeaways</a>
+    </nav>
+  </aside>
+
+  <main>
+    <section id="overview" class="py-5 hero-gradient border-bottom">
+      <div class="container py-4">
+        <div class="row align-items-center">
+          <div class="col-lg-9">
+            <h1 class="display-6 fw-bold mb-3">CS 180 Project 3 · (Auto)stitching and Photo Mosaics</h1>
+            <h3 class="mb-3">Sreeram Ranga</h3>
+            <p class="lead text-muted">
+              I captured overlapping panoramas/mosaics, detected correspondences, solved for homographies, warped every exposure into a shared reference, and blended the results into panoramas/mosaics. Along the way I rectified planar scenes and hardened the pipeline with lots of debugging artifacts.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="a1-capture" class="py-5">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel mb-4">
+              <div class="hd">A.1 · Shoot and Digitize Pictures</div>
+              <div class="bd">
+                <p>
+                  I captured three overlapping images per setting by rotating the camera about a fixed center of projection. Each bracket held roughly 40–60% overlap so the feature matcher could lean on texture that spanned the full image height.
+                </p>
+                <ul class="text-muted mb-0">
+                  <li><strong>Street:</strong> A downtown block with parked cars, brick façades, and strong vanishing lines.</li>
+                  <li><strong>Stairway:</strong> An indoor staircase with rails, tile grout, and ceiling beams that exaggerate perspective effects.</li>
+                  <li><strong>Classroom:</strong> A lecture room packed with desks, chairs, and overhead fixtures. It's cluttered but rich in corners and edges.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="panel mb-4">
+              <div class="hd">Street Image Set</div>
+              <div class="bd">
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/street/street1.jpg" alt="Street capture · image 1" loading="lazy">
+                      <figcaption class="overlay-text">street1 · left view</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/street/street2.jpg" alt="Street capture · image 2" loading="lazy">
+                      <figcaption class="overlay-text">street2 · reference</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/street/street3.jpg" alt="Street capture · image 3" loading="lazy">
+                      <figcaption class="overlay-text">street3 · right view</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel mb-4">
+              <div class="hd">Stairway Image Set</div>
+              <div class="bd">
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/stairway/stairway3.jpg" alt="Stairway capture · image 1" loading="lazy">
+                      <figcaption class="overlay-text">stairway1 · left view</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/stairway/stairway2.jpg" alt="Stairway capture · image 2" loading="lazy">
+                      <figcaption class="overlay-text">stairway2 · reference</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/stairway/stairway1.jpg" alt="Stairway capture · image 3" loading="lazy">
+                      <figcaption class="overlay-text">stairway3 · right view</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="hd">Classroom Image Set</div>
+              <div class="bd">
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/classroom/classroom3.jpg" alt="Classroom capture · image 1" loading="lazy">
+                      <figcaption class="overlay-text">classroom1 · left view</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/classroom/classroom2.jpg" alt="Classroom capture · image 2" loading="lazy">
+                      <figcaption class="overlay-text">classroom2 · reference</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/source_images/classroom/classroom1.jpg" alt="Classroom capture · image 3" loading="lazy">
+                      <figcaption class="overlay-text">classroom3 · right view</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="a2-homographies" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel mb-4">
+              <div class="hd">A.2 · Recover Homographies</div>
+              <div class="bd">
+                <p>
+                  Every homography came from my own matching stack. Harris corners (capped at 1,200 per image) supplied candidate keypoints. Each point received a 4×4 grid of gradient histograms with eight orientation bins—the descriptor was power-law normalized and Root-SIFTed to reduce the influence of outlier gradients.
+                </p>
+                <div class="note mb-3">
+                  <strong>Matching + RANSAC recipe</strong>
+                  <ul class="mb-0">
+                    <li>I normalized descriptors, computed cosine distances, and kept matches that passed Lowe’s 0.8 ratio test.</li>
+                    <li>I required mutual consistency so A↔B pairs agreed on their top match.</li>
+                    <li>I ran 4,000 rounds of RANSAC with a 2 px inlier threshold.</li>
+                    <li>I refit each homography using normalized DLT on all inliers.</li>
+                    <li>I restricted warp support to a dilated convex hull around inlier correspondences.</li>
+                  </ul>
+                </div>
+                <p class="text-muted mb-0">
+                  The resulting correspondence CSVs, homography matrices, and visualization overlays were stored under <code>deliverables/correspondences/&lt;dataset&gt;/</code>.
+                </p>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="hd">Implementation Snippet</div>
+              <div class="bd">
+                <p class="text-muted">Homographies were solved with normalized DLT to keep linear systems well-conditioned.</p>
+<pre class="code mb-0">def compute_homography(correspondences):
+    pts_a_norm, Ta = normalize_points(correspondences.points_a)
+    pts_b_norm, Tb = normalize_points(correspondences.points_b)
+    A = construct_dlt_matrix(CorrespondenceSet(pts_a_norm[:, :2], pts_b_norm[:, :2]))
+    _, _, vh = np.linalg.svd(A)
+    H_norm = vh[-1].reshape(3, 3)
+    H = np.linalg.inv(Tb) @ H_norm @ Ta
+    return H / H[2, 2]</pre>
+              </div>
+            </div>
+
+            <div class="panel mt-4">
+              <div class="hd small text-uppercase">Correspondence Visualizations</div>
+              <div class="bd">
+                <p class="text-muted mb-3">
+                  Each dataset contributed two correspondence sets (left/right image mapped onto the reference frame). The visualizations below overlay sampled matches on concatenated image pairs. Dense, well-distributed lines indicated healthy coverage.
+                </p>
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/street/street1_to_street2_visualization.png" alt="Street1 to Street2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Street · street1 → street2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/stairway/stairway1_to_stairway2_visualization.png" alt="Stairway1 to Stairway2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Stairway · stairway1 → stairway2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/classroom/classroom1_to_classroom2_visualization.png" alt="Classroom1 to Classroom2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Classroom · classroom1 → classroom2</figcaption>
+                    </figure>
+                  </div>
+                </div>
+                <div class="row g-4 mt-2">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/street/street3_to_street2_visualization.png" alt="Street3 to Street2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Street · street3 → street2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/stairway/stairway3_to_stairway2_visualization.png" alt="Stairway3 to Stairway2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Stairway · stairway3 → stairway2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="deliverables/correspondences/classroom/classroom3_to_classroom2_visualization.png" alt="Classroom3 to Classroom2 correspondences" loading="lazy">
+                      <figcaption class="overlay-text">Classroom · classroom3 → classroom2</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="a3-warping" class="py-5">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel mb-4">
+              <div class="hd">A.3 · Warp the Images</div>
+              <div class="bd">
+                <p>
+                  With homographies in hand, I implemented two inverse-warp kernels: nearest neighbor and bilinear. Bounds were derived from projecting image corners and, when available, the inlier correspondence cloud. Each warp returned both resampled pixels and a validity mask so the mosaic could normalize per-pixel weights later.
+                </p>
+<pre class="code mb-3">def warp_image_bilinear(image, H, bounds=None):
+    min_x, max_x, min_y, max_y = compute_warp_bounds(image.shape, H, bounds=bounds)
+    xs, ys = inverse_warp_coordinates((max_y - min_y + 1, max_x - min_x + 1), H, (min_x, min_y))
+    # Bilinear sampling with four-neighbor interpolation and validity mask.
+    return sampled, mask, (min_x, min_y)</pre>
+                <div class="note">
+                  <strong>Interpolation trade-offs</strong>
+                  <ul class="mb-0">
+                    <li><em>Nearest neighbor:</em> stayed pretty fast, but produced blocky edges. This was useful for debugging.</li>
+                    <li><em>Bilinear:</em> delivered smooth gradients and textures, making it ideal for final outputs.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div id="rectification-gallery" class="panel">
+              <div class="hd">Rectification Gallery</div>
+              <div class="bd">
+                <p class="text-muted">
+                  Before blending mosaics I rectified a planar surface from each dataset.
+                </p>
+
+                <div class="panel mb-4">
+                  <div class="hd small text-uppercase">Street</div>
+                  <div class="bd">
+                    <div class="row g-4">
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/street1/street1_rectangle_overlay.png" alt="Street rectification overlay" loading="lazy">
+                          <figcaption class="overlay-text">Planar selection</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/street1/street1_rectified_nearest.png" alt="Street rectified nearest" loading="lazy">
+                          <figcaption class="overlay-text">Nearest neighbor</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/street1/street1_rectified_bilinear.png" alt="Street rectified bilinear" loading="lazy">
+                          <figcaption class="overlay-text">Bilinear</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="panel mb-4">
+                  <div class="hd small text-uppercase">Stairway</div>
+                  <div class="bd">
+                    <div class="row g-4">
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/stairway1/stairway1_rectangle_overlay.png" alt="Stairway rectification overlay" loading="lazy">
+                          <figcaption class="overlay-text">Tile selection</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/stairway1/stairway1_rectified_nearest.png" alt="Stairway rectified nearest" loading="lazy">
+                          <figcaption class="overlay-text">Nearest neighbor</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/stairway1/stairway1_rectified_bilinear.png" alt="Stairway rectified bilinear" loading="lazy">
+                          <figcaption class="overlay-text">Bilinear</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="panel">
+                  <div class="hd small text-uppercase">Classroom</div>
+                  <div class="bd">
+                    <div class="row g-4">
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/classroom1/classroom1_rectangle_overlay.png" alt="Classroom rectification overlay" loading="lazy">
+                          <figcaption class="overlay-text">Planar selection</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/classroom1/classroom1_rectified_nearest.png" alt="Classroom rectified nearest" loading="lazy">
+                          <figcaption class="overlay-text">Nearest neighbor</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-md-4">
+                        <figure class="image-card">
+                          <img src="deliverables/rectifications/classroom1/classroom1_rectified_bilinear.png" alt="Classroom rectified bilinear" loading="lazy">
+                          <figcaption class="overlay-text">Bilinear</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="a4-mosaics" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel mb-4">
+              <div class="hd">A.4 · Blend Images into Mosaics</div>
+              <div class="bd">
+                <p>
+                  I left the middle exposure unwarped, inverse-warped the flanking views into that coordinate system, and accumulated colors with center-weighted feather masks. After all layers were stacked, the mosaic divided by the total weight per pixel to obtain the final exposure.
+                </p>
+                <p class="text-muted mb-0">
+                  The street, stairway, and classroom mosaics together met the assignment requirement of three mosaics (with source-image evidence above). Each set brought out different challenges in exposure balance, perspective, and clutter.
+                </p>
+              </div>
+            </div>
+
+            <div id="a4-street" class="panel mb-4">
+              <div class="hd">Street Panorama/Mosaic</div>
+              <div class="bd">
+                <p class="text-muted">
+                  A quick exposure tweak (scaling <code>street3.jpg</code> to 60% brightness) was all it took for the street mosaic to blend seamlessly. Brick patterns and windows align within a couple of pixels.
+                </p>
+                <figure class="image-card mb-3">
+                  <img src="deliverables/mosaics/street_mosaic.png" alt="Street mosaic" loading="lazy">
+                  <figcaption class="overlay-text">Final street mosaic</figcaption>
+                </figure>
+                <div class="note">
+                  <strong>Highlights</strong>
+                  <ul class="mb-0">
+                    <li>RANSAC inlier counts were 20 (street1→street2) and 21 (street3→street2).</li>
+                    <li>Feather seams passed through low-detail sky and pavement, hiding transitions.</li>
+                    <li>No Laplacian pyramid was needed. The linear weights were enough once exposures matched.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div id="a4-stairway" class="panel mb-4">
+              <div class="hd">Stairway Panorama/Mosaic</div>
+              <div class="bd">
+                <p class="text-muted">
+                  The staircase mosaic demonstrates how well the projective model preserves long straight lines. Rails, tile grout, and ceiling beams all align very well.
+                </p>
+                <figure class="image-card mb-3">
+                  <img src="deliverables/mosaics/stairway_mosaic.png" alt="Stairway mosaic" loading="lazy">
+                  <figcaption class="overlay-text">Final stairway mosaic</figcaption>
+                </figure>
+                <div class="note">
+                  <strong>Highlights</strong>
+                  <ul class="mb-0">
+                    <li>No manual exposure edits were necessary.</li>
+                    <li>Feather masks tapered to zero near warped boundaries, keeping the focus on the staircase.</li>
+                    <li>Straight lines stayed straight, confirming the accuracy of the homographies and resampling.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div id="a4-classroom" class="panel">
+              <div class="hd">Classroom Panorama/Mosaic
+              </div>
+              <div class="bd">
+                <p class="text-muted">
+                  The classroom blend proved the most cluttered: repeating desks and ceiling fixtures meant small mismatches showed quickly, but the walls, window shades, and rows of seats aligned well after matching.
+                </p>
+                <figure class="image-card mb-3">
+                  <img src="deliverables/mosaics/classroom_mosaic.png" alt="Classroom mosaic" loading="lazy">
+                  <figcaption class="overlay-text">Final classroom mosaic</figcaption>
+                </figure>
+                <div class="note">
+                  <strong>What I observed</strong>
+                  <ul class="mb-0">
+                    <li>Static structural elements (walls, board edges) blended cleanly; rows of desks highlighted the limits of single-homography stitching when parallax crept in.</li>
+                    <li>If I had more time, I would mask the closest desks and retouch the seam manually.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+
+
+
+
+    <section id="diagnostics" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <h2 class="fw-bold mb-3">Debug &amp; Diagnostics</h2>
+            <p class="text-muted">
+              Every run writes verbose logs and intermediate renders to <code>deliverables/debug/</code>. These artifacts saved me multiple times whenever a homography drifted or a warp canvas exploded in size.
+            </p>
+            <div class="row g-4">
+              <div class="col-md-4">
+                <figure class="image-card">
+                  <img src="deliverables/debug/image_mosaic_warped_0_20251010T012621294688Z.png" alt="Warped layer 0" loading="lazy">
+                  <figcaption class="overlay-text">Warped layer · street1 → street2</figcaption>
+                </figure>
+              </div>
+              <div class="col-md-4">
+                <figure class="image-card">
+                  <img src="deliverables/debug/image_mosaic_warped_1_20251010T012640171683Z.png" alt="Warped layer 1" loading="lazy">
+                  <figcaption class="overlay-text">Warped layer · street3 → street2</figcaption>
+                </figure>
+              </div>
+              <div class="col-md-4">
+                <figure class="image-card">
+                  <img src="deliverables/debug/image_street_mosaic_20251010T012659775385Z.png" alt="Debug street mosaic" loading="lazy">
+                  <figcaption class="overlay-text">Saved debug mosaic</figcaption>
+                </figure>
+              </div>
+            </div>
+            <div class="note mt-3">
+              <strong>What the logs capture</strong>
+              <ul class="mb-0">
+                <li>Homography determinants, bounds of each warped image, and timestamps.</li>
+                <li>Exposure adjustments applied before matching (e.g., street3 brightness scaling).</li>
+                <li>Saved PNGs for every warped layer so misalignment is easy to spot without rerunning the pipeline.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="reproduce" class="py-5">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">How to Reproduce the Project</div>
+              <div class="bd">
+                <p class="text-muted">All commands assume the repository root and a Python 3.9+ environment.</p>
+<pre class="code mb-3">python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install numpy==1.26.4 pillow==11.3.0 imageio==2.36.0 matplotlib==3.9.2
+
+# Generate correspondences and mosaics for every dataset
+python3 generate_deliverables.py --datasets street stairway classroom --stages match mosaic
+
+# Regenerate rectification examples
+python3 generate_deliverables.py --stages rectify</pre>
+                <p class="text-muted mb-0">
+                  <code>generate_deliverables.py</code> orchestrates everything: feature extraction, RANSAC, warping, blending, and artifact collection. Individual modules (e.g., <code>output/feature_matching.py</code>, <code>output/warping.py</code>, <code>output/mosaic.py</code>) can also be run in isolation for debugging.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="takeaways" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">Takeaways</div>
+              <div class="bd">
+                <div class="row g-4">
+                  <div class="col-md-6">
+                    <h6 class="fw-semibold">Wins</h6>
+                    <ul class="mb-0 text-muted">
+                      <li>Automatic feature matching with RANSAC gave solid alignment, enough to create three pretty good mosaics.</li>
+                      <li>Convex overlap masking trimmed out extra regions and kept memory usage consistent. I initially had a lot of issues with my Mac running out of physical memory to run everything.</li>
+                      <li>The debug logger really paid off. Each stage logs what it does, so tracking down anything that didn't seem right wasn't super difficult.</li>
+                    </ul>
+                    </div>
+                    <div class="col-md-6">
+                      <h6 class="fw-semibold">Lessons Learned</h6>
+                      <ul class="mb-0 text-muted">
+                        <li>Fixing exposure mismatches early works best. A little brightness scaling can turn harsh seams into a seamless panorama/mosaic.</li>
+                        <li>Parallax is still the hardest problem. Handheld shots with close-by clutter (like classroom desks) are tough without better modeling.</li>
+                        <li>A simple linear feather often outperforms more complex blending, as long as the geometry is on point.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal fade modal-image" id="image-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+      <div class="modal-content bg-transparent border-0">
+        <div class="modal-body p-0">
+          <div class="d-flex justify-content-end">
+            <button type="button" class="btn-close btn-close-white me-2 mt-2" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="px-3 pb-4 text-center">
+            <img id="image-modal-img" class="img-fluid rounded-4 shadow" src="" alt="" />
+            <div id="image-modal-caption" class="mt-3 text-light fw-semibold"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="py-4 border-top bg-white">
+    <div class="container text-center small text-muted">
+      <span>&copy; <span id="year"></span> · CS 180 Project 3</span>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const bar = document.getElementById('scroll-progress-bar');
+    function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+    function updateProgress() {
+      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      const doc = document.documentElement;
+      const max = (doc.scrollHeight - window.innerHeight) || 1;
+      bar.style.width = (clamp(scrollY / max, 0, 1) * 100).toFixed(2) + '%';
+
+      const offset = 110;
+      const linkMap = new Map(Array.from(document.querySelectorAll('#toc-nav a')).map(a => [a.getAttribute('href').slice(1), a]));
+      document.querySelectorAll('main section[id]').forEach(sec => {
+        const start = sec.offsetTop - offset;
+        const end = start + sec.offsetHeight;
+        const percent = clamp((scrollY - start) / (end - start), 0, 1);
+        const link = linkMap.get(sec.id);
+        if (link) {
+          if (scrollY >= start && scrollY < end) {
+            link.classList.add('active');
+          } else {
+            link.classList.remove('active');
+          }
+          link.style.setProperty('--p', (percent * 100) + '%');
+        }
+      });
+    }
+    window.addEventListener('scroll', updateProgress, { passive: true });
+    window.addEventListener('resize', updateProgress);
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('year').textContent = new Date().getFullYear();
+      updateProgress();
+
+      const modalEl = document.getElementById('image-modal');
+      const modalImg = document.getElementById('image-modal-img');
+      const modalCaption = document.getElementById('image-modal-caption');
+      const modal = new bootstrap.Modal(modalEl, { focus: true });
+
+      document.querySelectorAll('figure.image-card img').forEach(img => {
+        img.addEventListener('click', () => {
+          const full = img.dataset.full || img.src;
+          modalImg.src = full;
+          modalImg.alt = img.alt || '';
+          const overlay = img.closest('figure')?.querySelector('.overlay-text');
+          modalCaption.textContent = overlay ? overlay.textContent : (img.alt || '');
+          modal.show();
+        });
+      });
+
+      modalEl.addEventListener('hidden.bs.modal', () => {
+        modalImg.src = '';
+        modalCaption.textContent = '';
+      });
+    });
+  </script>
+</body>
+</html>

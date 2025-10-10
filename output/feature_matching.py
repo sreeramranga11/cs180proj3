@@ -60,10 +60,10 @@ def convolve2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
 # Harris corner detector and simple patch descriptors
 @dataclass
 class HarrisCornerDetector:
-    num_features: int = 750
+    num_features: int = 1200
     k: float = 0.04
     window_size: int = 5
-    min_distance: int = 6
+    min_distance: int = 5
 
     def detect(self, image: ArrayLike) -> np.ndarray:
         gray = to_grayscale(image)
@@ -82,7 +82,8 @@ class HarrisCornerDetector:
         trace = ix2 + iy2
         response = det - self.k * (trace**2)
 
-        threshold = 0.01 * response.max()
+        response = np.where(response > 0, response, 0.0)
+        threshold = max(0.005 * response.max(), 1e-6)
         response[response < threshold] = 0
 
         # Non-maximum suppression: greedily pick the strongest corners while blanking out a radius around each accepted point.
@@ -112,11 +113,17 @@ class HarrisCornerDetector:
 
 @dataclass
 class PatchDescriptorExtractor:
-    patch_size: int = 15
+    patch_size: int = 21
+    num_cells: int = 4
+    num_bins: int = 8
 
     def extract(self, image: ArrayLike, keypoints: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if self.patch_size % 2 == 0:
+            raise ValueError("Patch size must be odd so it has a well-defined center")
+
         gray = to_grayscale(image)
         half = self.patch_size // 2
+        descriptor_dim = self.num_cells * self.num_cells * self.num_bins
 
         valid_mask = (
             (keypoints[:, 0] >= half)
@@ -125,58 +132,135 @@ class PatchDescriptorExtractor:
             & (keypoints[:, 1] < gray.shape[1] - half)
         )
 
-        valid_points = keypoints[valid_mask]
-        if valid_points.size == 0:
-            return np.empty((0, 2), dtype=np.float32), np.empty((0, self.patch_size**2), dtype=np.float32)
+        candidate_points = keypoints[valid_mask]
+        if candidate_points.size == 0:
+            return (
+                np.empty((0, 2), dtype=np.float32),
+                np.empty((0, descriptor_dim), dtype=np.float32),
+            )
 
-        patches = []
-        for y, x in valid_points:
+        cell_edges = np.linspace(0, self.patch_size, self.num_cells + 1, dtype=int)
+        descriptors: list[np.ndarray] = []
+        accepted_points: list[Tuple[float, float]] = []
+
+        for y, x in candidate_points:
             y0 = int(y) - half
             y1 = int(y) + half + 1
             x0 = int(x) - half
             x1 = int(x) + half + 1
             patch = gray[y0:y1, x0:x1].astype(np.float32)
-            desc = patch.reshape(-1)
-            desc -= desc.mean()
-            norm = np.linalg.norm(desc)
+            if patch.shape[0] != self.patch_size or patch.shape[1] != self.patch_size:
+                continue
+
+            gy, gx = np.gradient(patch)
+            magnitude = np.hypot(gx, gy)
+            if float(magnitude.sum()) <= 1e-6:
+                continue
+            orientation = (np.arctan2(gy, gx) + 2 * np.pi) % (2 * np.pi)
+
+            histograms = []
+            for i in range(self.num_cells):
+                for j in range(self.num_cells):
+                    y_start, y_stop = cell_edges[i], cell_edges[i + 1]
+                    x_start, x_stop = cell_edges[j], cell_edges[j + 1]
+
+                    cell_mag = magnitude[y_start:y_stop, x_start:x_stop]
+                    cell_ori = orientation[y_start:y_stop, x_start:x_stop]
+                    if cell_mag.size == 0:
+                        histograms.append(np.zeros(self.num_bins, dtype=np.float32))
+                        continue
+
+                    bins = np.zeros(self.num_bins, dtype=np.float32)
+                    bin_idx = np.floor((cell_ori / (2 * np.pi)) * self.num_bins).astype(int)
+                    bin_idx = np.clip(bin_idx, 0, self.num_bins - 1)
+                    np.add.at(bins, bin_idx.ravel(), cell_mag.ravel())
+                    histograms.append(bins)
+
+            descriptor = np.concatenate(histograms).astype(np.float32, copy=False)
+            norm = np.linalg.norm(descriptor)
             if norm > 1e-6:
-                desc /= norm
-            patches.append(desc)
+                descriptor = descriptor / norm
+                descriptor = np.sqrt(descriptor)
+                norm = np.linalg.norm(descriptor)
+                if norm > 1e-6:
+                    descriptor /= norm
 
-        descriptors = np.vstack(patches)
-        return valid_points, descriptors
+            descriptors.append(descriptor)
+            accepted_points.append((y, x))
+
+        if not descriptors:
+            return (
+                np.empty((0, 2), dtype=np.float32),
+                np.empty((0, descriptor_dim), dtype=np.float32),
+            )
+
+        return (
+            np.asarray(accepted_points, dtype=np.float32),
+            np.vstack(descriptors).astype(np.float32, copy=False),
+        )
 
 
-def match_descriptors(descriptors_a: np.ndarray, descriptors_b: np.ndarray, ratio: float = 0.8) -> np.ndarray:
+def match_descriptors(
+    descriptors_a: np.ndarray,
+    descriptors_b: np.ndarray,
+    ratio: float = 0.8,
+    require_consistency: bool = True,
+) -> np.ndarray:
     if descriptors_a.size == 0 or descriptors_b.size == 0:
         return np.empty((0, 2), dtype=np.int64)
 
-    matches = []
-    for idx_a, desc in enumerate(descriptors_a):
-        distances = np.linalg.norm(descriptors_b - desc, axis=1)
-        if distances.size < 2:
-            continue
-        order = np.argsort(distances)
-        best, second = distances[order[0]], distances[order[1]]
-        if best < 1e-12:
-            ratio_test = 0.0
-        else:
-            ratio_test = best / (second + 1e-12)
-        if ratio_test < ratio:
-            matches.append((idx_a, order[0], best))
+    def _normalize_rows(arr: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        safe_norms = np.maximum(norms, 1e-12)
+        return arr / safe_norms
 
-    if not matches:
+    a_norm = _normalize_rows(descriptors_a.astype(np.float32, copy=False))
+    b_norm = _normalize_rows(descriptors_b.astype(np.float32, copy=False))
+
+    similarity = np.clip(a_norm @ b_norm.T, -1.0, 1.0)
+    distances = np.sqrt(np.maximum(2.0 - 2.0 * similarity, 0.0))
+
+    order = np.argsort(distances, axis=1)
+    best_idx = order[:, 0]
+    best_dist = distances[np.arange(distances.shape[0]), best_idx]
+
+    if distances.shape[1] > 1:
+        second_idx = order[:, 1]
+        second_dist = distances[np.arange(distances.shape[0]), second_idx]
+    else:
+        second_dist = np.full_like(best_dist, np.inf)
+
+    ratios = np.divide(
+        best_dist,
+        second_dist,
+        out=np.full_like(best_dist, np.inf),
+        where=second_dist > 1e-12,
+    )
+    candidate_mask = ratios < ratio
+
+    if require_consistency:
+        best_a_for_b = np.argmin(distances, axis=0)
+        mutual_mask = best_a_for_b[best_idx] == np.arange(distances.shape[0])
+        candidate_mask &= mutual_mask
+
+    if not np.any(candidate_mask):
         return np.empty((0, 2), dtype=np.int64)
 
-    matches.sort(key=lambda item: item[2])
-    return np.asarray([[m[0], m[1]] for m in matches], dtype=np.int64)
+    selected_indices = np.where(candidate_mask)[0]
+    selected = np.stack(
+        [selected_indices, best_idx[selected_indices]],
+        axis=1,
+    )
+
+    order_by_distance = np.argsort(best_dist[selected_indices])
+    return selected[order_by_distance].astype(np.int64, copy=False)
 
 
 # RANSAC based homography estimation
 @dataclass
 class RansacHomographyEstimator:
-    num_iterations: int = 2000
-    inlier_threshold: float = 3.0
+    num_iterations: int = 4000
+    inlier_threshold: float = 2.0
     random_seed: int = 42
 
     def estimate(self, points_a: PointArray, points_b: PointArray) -> Tuple[np.ndarray, CorrespondenceSet]:

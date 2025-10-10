@@ -20,6 +20,7 @@ DATASETS: Dict[str, List[str]] = {
     "bedroom": ["bedroom1.jpg", "bedroom2.jpg", "bedroom3.jpg"],
     "stairway": ["stairway1.jpg", "stairway2.jpg", "stairway3.jpg"],
     "street": ["street1.jpg", "street2.jpg", "street3.jpg"],
+    "classroom": ["classroom1.jpg", "classroom2.jpg", "classroom3.jpg"],
 }
 
 RECTIFICATION_IMAGES = ["bedroom1.jpg", "stairway1.jpg", "street1.jpg"]
