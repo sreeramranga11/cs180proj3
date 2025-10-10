@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CS 180 Project 3 · (Auto)stitching and Photo Mosaics</title>
-  <meta name="description" content="CS 180 Project 3 · (Auto)stitching and Photo Mosaics. Feature matching, homography estimation, inverse warping, rectification, and multi-image mosaics." />
+  <meta name="description" content="CS 180 Project 3 · (Auto)stitching and Photo Mosaics. Manual homography recovery, inverse warping, rectification, and multi-image mosaics." />
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -113,7 +113,6 @@
       <a class="nav-link sub" href="#a4-street">Street Panorama</a>
       <a class="nav-link sub" href="#a4-stairway">Stairway Panorama</a>
       <a class="nav-link sub" href="#a4-classroom">Classroom Panorama</a>
-      <a class="nav-link" href="#diagnostics">Debug &amp; Diagnostics</a>
       <a class="nav-link" href="#reproduce">Reproducing Results</a>
       <a class="nav-link" href="#takeaways">Takeaways</a>
     </nav>
@@ -127,7 +126,7 @@
             <h1 class="display-6 fw-bold mb-3">CS 180 Project 3 · (Auto)stitching and Photo Mosaics</h1>
             <h3 class="mb-3">Sreeram Ranga</h3>
             <p class="lead text-muted">
-              I captured overlapping panoramas/mosaics, detected correspondences, solved for homographies, warped every exposure into a shared reference, and blended the results into panoramas/mosaics. Along the way I rectified planar scenes and hardened the pipeline with lots of debugging artifacts.
+              I captured overlapping panoramas, handpicked matching points, solved for homographies, warped each exposure into a shared reference, and blended the results into mosaics. Along the way I rectified planar scenes and curated the manual correspondences I used to align everything.
             </p>
           </div>
         </div>
@@ -142,7 +141,7 @@
               <div class="hd">A.1 · Shoot and Digitize Pictures</div>
               <div class="bd">
                 <p>
-                  I captured three overlapping images per setting by rotating the camera about a fixed center of projection. Each bracket held roughly 40–60% overlap so the feature matcher could lean on texture that spanned the full image height.
+                  I captured three overlapping images per setting by rotating the camera about a fixed center of projection. Each bracket held roughly 40–60% overlap so I would have plenty of texture to rely on while selecting correspondences by hand.
                 </p>
                 <ul class="text-muted mb-0">
                   <li><strong>Street:</strong> A downtown block with parked cars, brick façades, and strong vanishing lines.</li>
@@ -242,20 +241,19 @@
               <div class="hd">A.2 · Recover Homographies</div>
               <div class="bd">
                 <p>
-                  Every homography came from my own matching stack. Harris corners (capped at 1,200 per image) supplied candidate keypoints. Each point received a 4×4 grid of gradient histograms with eight orientation bins—the descriptor was power-law normalized and Root-SIFTed to reduce the influence of outlier gradients.
+                  I manually annotated 15–25 correspondences for each overlap using matplotlib's <code>ginput</code>. Keeping a consistent order ensured the same world points lined up across images.
                 </p>
                 <div class="note mb-3">
-                  <strong>Matching + RANSAC recipe</strong>
+                  <strong>Manual workflow</strong>
                   <ul class="mb-0">
-                    <li>I normalized descriptors, computed cosine distances, and kept matches that passed Lowe’s 0.8 ratio test.</li>
-                    <li>I required mutual consistency so A↔B pairs agreed on their top match.</li>
-                    <li>I ran 4,000 rounds of RANSAC with a 2 px inlier threshold.</li>
-                    <li>I refit each homography using normalized DLT on all inliers.</li>
-                    <li>I restricted warp support to a dilated convex hull around inlier correspondences.</li>
+                    <li>Chose the middle exposure as the reference frame for every scene.</li>
+                    <li>Clicked matching corners, edges, and texture anchors on each additional photo.</li>
+                    <li>Saved the points to CSV files in <code>deliverables/correspondences/&lt;dataset&gt;/</code>.</li>
+                    <li>Ran normalized DLT, inspected reprojection error, and re-clicked outliers when needed.</li>
                   </ul>
                 </div>
                 <p class="text-muted mb-0">
-                  The resulting correspondence CSVs, homography matrices, and visualization overlays were stored under <code>deliverables/correspondences/&lt;dataset&gt;/</code>.
+                  The visualizations below overlay those hand-picked correspondences on concatenated image pairs to verify coverage across the frame.
                 </p>
               </div>
             </div>
@@ -328,7 +326,6 @@
         </div>
       </div>
     </section>
-
     <section id="a3-warping" class="py-5">
       <div class="container">
         <div class="row justify-content-center">
@@ -337,7 +334,7 @@
               <div class="hd">A.3 · Warp the Images</div>
               <div class="bd">
                 <p>
-                  With homographies in hand, I implemented two inverse-warp kernels: nearest neighbor and bilinear. Bounds were derived from projecting image corners and, when available, the inlier correspondence cloud. Each warp returned both resampled pixels and a validity mask so the mosaic could normalize per-pixel weights later.
+                  With homographies in hand, I implemented two inverse-warp kernels: nearest neighbor and bilinear. Bounds were derived from projecting image corners and the manually clicked correspondence cloud. Each warp returned both resampled pixels and a validity mask so the mosaic could normalize per-pixel weights later.
                 </p>
 <pre class="code mb-3">def warp_image_bilinear(image, H, bounds=None):
     min_x, max_x, min_y, max_y = compute_warp_bounds(image.shape, H, bounds=bounds)
@@ -475,7 +472,7 @@
                 <div class="note">
                   <strong>Highlights</strong>
                   <ul class="mb-0">
-                    <li>RANSAC inlier counts were 20 (street1→street2) and 21 (street3→street2).</li>
+                    <li>About twenty hand-labeled correspondences anchored each overlap, keeping reprojection error under ~1.5 px.</li>
                     <li>Feather seams passed through low-detail sky and pavement, hiding transitions.</li>
                     <li>No Laplacian pyramid was needed. The linear weights were enough once exposures matched.</li>
                   </ul>
@@ -509,7 +506,7 @@
               </div>
               <div class="bd">
                 <p class="text-muted">
-                  The classroom blend proved the most cluttered: repeating desks and ceiling fixtures meant small mismatches showed quickly, but the walls, window shades, and rows of seats aligned well after matching.
+                  The classroom blend proved the most cluttered: repeating desks and ceiling fixtures meant small mismatches showed quickly, but the walls, window shades, and rows of seats aligned well once the homographies were solved.
                 </p>
                 <figure class="image-card mb-3">
                   <img src="deliverables/mosaics/classroom_mosaic.png" alt="Classroom mosaic" loading="lazy">
@@ -534,47 +531,6 @@
 
 
 
-
-    <section id="diagnostics" class="py-5 bg-white border-top">
-      <div class="container">
-        <div class="row justify-content-center">
-          <div class="col-lg-9">
-            <h2 class="fw-bold mb-3">Debug &amp; Diagnostics</h2>
-            <p class="text-muted">
-              Every run writes verbose logs and intermediate renders to <code>deliverables/debug/</code>. These artifacts saved me multiple times whenever a homography drifted or a warp canvas exploded in size.
-            </p>
-            <div class="row g-4">
-              <div class="col-md-4">
-                <figure class="image-card">
-                  <img src="deliverables/debug/image_mosaic_warped_0_20251010T012621294688Z.png" alt="Warped layer 0" loading="lazy">
-                  <figcaption class="overlay-text">Warped layer · street1 → street2</figcaption>
-                </figure>
-              </div>
-              <div class="col-md-4">
-                <figure class="image-card">
-                  <img src="deliverables/debug/image_mosaic_warped_1_20251010T012640171683Z.png" alt="Warped layer 1" loading="lazy">
-                  <figcaption class="overlay-text">Warped layer · street3 → street2</figcaption>
-                </figure>
-              </div>
-              <div class="col-md-4">
-                <figure class="image-card">
-                  <img src="deliverables/debug/image_street_mosaic_20251010T012659775385Z.png" alt="Debug street mosaic" loading="lazy">
-                  <figcaption class="overlay-text">Saved debug mosaic</figcaption>
-                </figure>
-              </div>
-            </div>
-            <div class="note mt-3">
-              <strong>What the logs capture</strong>
-              <ul class="mb-0">
-                <li>Homography determinants, bounds of each warped image, and timestamps.</li>
-                <li>Exposure adjustments applied before matching (e.g., street3 brightness scaling).</li>
-                <li>Saved PNGs for every warped layer so misalignment is easy to spot without rerunning the pipeline.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
 
     <section id="reproduce" class="py-5">
       <div class="container">
@@ -603,7 +559,6 @@ python3 generate_deliverables.py --stages rectify</pre>
         </div>
       </div>
     </section>
-
     <section id="takeaways" class="py-5 bg-white border-top">
       <div class="container">
         <div class="row justify-content-center">
@@ -615,7 +570,7 @@ python3 generate_deliverables.py --stages rectify</pre>
                   <div class="col-md-6">
                     <h6 class="fw-semibold">Wins</h6>
                     <ul class="mb-0 text-muted">
-                      <li>Automatic feature matching with RANSAC gave solid alignment, enough to create three pretty good mosaics.</li>
+                      <li>Carefully curated manual correspondences kept alignment tight enough to create three solid mosaics.</li>
                       <li>Convex overlap masking trimmed out extra regions and kept memory usage consistent. I initially had a lot of issues with my Mac running out of physical memory to run everything.</li>
                       <li>The debug logger really paid off. Each stage logs what it does, so tracking down anything that didn't seem right wasn't super difficult.</li>
                     </ul>
