@@ -28,7 +28,7 @@ def get_harris_corners(im: np.ndarray, edge_discard: int = 20):
     h = det - k * (trace**2)
     h = np.where(h > 0, h, 0.0)
 
-    threshold = max(0.005 * h.max(), 1e-6)
+    threshold = max(0.002 * h.max(), 1e-6)
     response = h.copy()
     response[h < threshold] = 0
 

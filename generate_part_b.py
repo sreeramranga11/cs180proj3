@@ -69,7 +69,35 @@ def process_dataset(dataset: str, reference_index: int, output_root: Path) -> No
     images_dir = Path("images")
     images = [load_image(images_dir / name) for name in filenames]
 
-    matcher = FeatureMatcher()
+    from output.feature_matching import HarrisCornerDetector, PatchDescriptorExtractor, RansacHomographyEstimator, match_descriptors
+    import numpy as np
+    
+    class CustomFeatureMatcher(FeatureMatcher):
+        def match_images(self, image_a, image_b):
+            keypoints_a = self.corner_detector.detect(image_a)
+            keypoints_b = self.corner_detector.detect(image_b)
+
+            pts_a, desc_a = self.descriptor_extractor.extract(image_a, keypoints_a)
+            pts_b, desc_b = self.descriptor_extractor.extract(image_b, keypoints_b)
+
+            matches = match_descriptors(desc_a, desc_b, ratio=0.85, require_consistency=True, max_distance=0.6)
+            if matches.shape[0] < 4:
+                raise RuntimeError("Not enough matches were found between the images")
+
+            matched_pts_a = pts_a[matches[:, 0]]
+            matched_pts_b = pts_b[matches[:, 1]]
+
+            # Convert from (row, col) to Cartesian (x, y) ordering expected elsewhere.
+            points_a = np.column_stack([matched_pts_a[:, 1], matched_pts_a[:, 0]])
+            points_b = np.column_stack([matched_pts_b[:, 1], matched_pts_b[:, 0]])
+
+            H, inlier_corr = self.estimator.estimate(points_a, points_b)
+            return H, inlier_corr
+    
+    corner_detector = HarrisCornerDetector(num_features=2000, edge_discard=20, anms_oversample=8000)
+    descriptor_extractor = PatchDescriptorExtractor(patch_size=8, window_size=40)
+    estimator = RansacHomographyEstimator(num_iterations=8000, inlier_threshold=2.0, random_seed=42)
+    matcher = CustomFeatureMatcher(corner_detector=corner_detector, descriptor_extractor=descriptor_extractor, estimator=estimator)
     reference_image = images[reference_index]
 
     # Corner overlays
@@ -105,7 +133,8 @@ def process_dataset(dataset: str, reference_index: int, output_root: Path) -> No
     # Automatic mosaic
     auto_dir = output_root / "mosaics"
     ensure_dir(auto_dir)
-    builder = MosaicBuilder(reference_shape=reference_image.shape)
+    from output.mosaic import LaplacianPyramidBlendStrategy
+    builder = MosaicBuilder(reference_shape=reference_image.shape, blend_strategy=LaplacianPyramidBlendStrategy(num_levels=3))
     additional_images = [images[idx] for idx in range(len(images)) if idx != reference_index]
     mosaic = builder.build(reference_image, additional_images, correspondences)
     save_image(auto_dir / f"{dataset}_automatic.png", mosaic)
