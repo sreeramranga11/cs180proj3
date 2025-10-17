@@ -11,6 +11,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 from .homography import compute_homography, apply_homography
 from .io_utils import CorrespondenceIO, CorrespondenceSet
+from .harris import get_harris_corners, dist2
 
 ArrayLike = np.ndarray
 PointArray = np.ndarray
@@ -61,69 +62,67 @@ def convolve2d(image: np.ndarray, kernel: np.ndarray) -> np.ndarray:
 @dataclass
 class HarrisCornerDetector:
     num_features: int = 1200
-    k: float = 0.04
-    window_size: int = 5
-    min_distance: int = 5
+    edge_discard: int = 20
+    anms_oversample: int = 5000
 
-    def detect(self, image: ArrayLike) -> np.ndarray:
+    def detect(self, image: ArrayLike, return_all: bool = False) -> np.ndarray:
         gray = to_grayscale(image)
+        h, coords = get_harris_corners(gray, edge_discard=self.edge_discard)
+        coords = coords.T  # (N, 2) in (row, col)
 
-        sobel_x = np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype=np.float32) / 8.0
-        sobel_y = sobel_x.T
-        ix = convolve2d(gray, sobel_x)
-        iy = convolve2d(gray, sobel_y)
+        if coords.size == 0:
+            empty = np.empty((0, 2), dtype=np.float32)
+            return (empty, empty) if return_all else empty
 
-        gauss = gaussian_kernel(self.window_size, sigma=self.window_size / 3)
-        ix2 = convolve2d(ix * ix, gauss)
-        iy2 = convolve2d(iy * iy, gauss)
-        ixy = convolve2d(ix * iy, gauss)
-
-        det = ix2 * iy2 - ixy**2
-        trace = ix2 + iy2
-        response = det - self.k * (trace**2)
-
-        response = np.where(response > 0, response, 0.0)
-        threshold = max(0.005 * response.max(), 1e-6)
-        response[response < threshold] = 0
-
-        # Non-maximum suppression: greedily pick the strongest corners while blanking out a radius around each accepted point.
-        coords = np.argwhere(response > 0)
-        strengths = response[coords[:, 0], coords[:, 1]]
+        strengths = h[coords[:, 0], coords[:, 1]]
         order = np.argsort(strengths)[::-1]
+        coords = coords[order]
+        strengths = strengths[order]
 
-        suppressed = np.zeros_like(response, dtype=bool)
-        selected = []
-        radius = self.min_distance
+        oversample = min(self.anms_oversample, coords.shape[0])
+        coords = coords[:oversample]
+        strengths = strengths[:oversample]
 
-        for idx in order:
-            y, x = coords[idx]
-            if suppressed[y, x]:
-                continue
-            selected.append((y, x))
-            y0 = max(0, y - radius)
-            y1 = min(response.shape[0], y + radius + 1)
-            x0 = max(0, x - radius)
-            x1 = min(response.shape[1], x + radius + 1)
-            suppressed[y0:y1, x0:x1] = True
-            if len(selected) >= self.num_features:
-                break
+        anms_coords = self._apply_anms(coords, strengths)
 
-        return np.asarray(selected, dtype=np.float32)
+        if return_all:
+            top_raw = coords[: min(self.num_features, coords.shape[0])].astype(np.float32)
+            return top_raw, anms_coords
+        return anms_coords
+
+    def _apply_anms(self, coords: np.ndarray, strengths: np.ndarray) -> np.ndarray:
+        target = min(self.num_features, coords.shape[0])
+        if coords.shape[0] <= target:
+            return coords.astype(np.float32)
+
+        pts = coords.astype(np.float64)
+        d2 = dist2(pts, pts)
+        np.fill_diagonal(d2, np.inf)
+
+        radii = np.full(coords.shape[0], np.inf, dtype=np.float64)
+        for i in range(coords.shape[0]):
+            stronger_mask = strengths > strengths[i]
+            if not np.any(stronger_mask):
+                radii[i] = np.inf
+            else:
+                radii[i] = np.min(d2[i, stronger_mask])
+
+        order = np.argsort(radii)[::-1]
+        selected = coords[order[:target]]
+        return selected.astype(np.float32)
 
 
 @dataclass
 class PatchDescriptorExtractor:
-    patch_size: int = 21
-    num_cells: int = 4
-    num_bins: int = 8
+    patch_size: int = 8
+    window_size: int = 40
 
     def extract(self, image: ArrayLike, keypoints: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        if self.patch_size % 2 == 0:
-            raise ValueError("Patch size must be odd so it has a well-defined center")
+        if self.window_size % 2 != 0:
+            raise ValueError("Window size must be even so it has a symmetric extent")
 
         gray = to_grayscale(image)
-        half = self.patch_size // 2
-        descriptor_dim = self.num_cells * self.num_cells * self.num_bins
+        half = self.window_size // 2
 
         valid_mask = (
             (keypoints[:, 0] >= half)
@@ -136,62 +135,37 @@ class PatchDescriptorExtractor:
         if candidate_points.size == 0:
             return (
                 np.empty((0, 2), dtype=np.float32),
-                np.empty((0, descriptor_dim), dtype=np.float32),
+                np.empty((0, self.patch_size * self.patch_size), dtype=np.float32),
             )
 
-        cell_edges = np.linspace(0, self.patch_size, self.num_cells + 1, dtype=int)
         descriptors: list[np.ndarray] = []
         accepted_points: list[Tuple[float, float]] = []
 
         for y, x in candidate_points:
-            y0 = int(y) - half
-            y1 = int(y) + half + 1
-            x0 = int(x) - half
-            x1 = int(x) + half + 1
+            yc = int(round(float(y)))
+            xc = int(round(float(x)))
+            y0 = yc - half
+            y1 = yc + half
+            x0 = xc - half
+            x1 = xc + half
             patch = gray[y0:y1, x0:x1].astype(np.float32)
-            if patch.shape[0] != self.patch_size or patch.shape[1] != self.patch_size:
+            if patch.shape != (self.window_size, self.window_size):
                 continue
 
-            gy, gx = np.gradient(patch)
-            magnitude = np.hypot(gx, gy)
-            if float(magnitude.sum()) <= 1e-6:
-                continue
-            orientation = (np.arctan2(gy, gx) + 2 * np.pi) % (2 * np.pi)
-
-            histograms = []
-            for i in range(self.num_cells):
-                for j in range(self.num_cells):
-                    y_start, y_stop = cell_edges[i], cell_edges[i + 1]
-                    x_start, x_stop = cell_edges[j], cell_edges[j + 1]
-
-                    cell_mag = magnitude[y_start:y_stop, x_start:x_stop]
-                    cell_ori = orientation[y_start:y_stop, x_start:x_stop]
-                    if cell_mag.size == 0:
-                        histograms.append(np.zeros(self.num_bins, dtype=np.float32))
-                        continue
-
-                    bins = np.zeros(self.num_bins, dtype=np.float32)
-                    bin_idx = np.floor((cell_ori / (2 * np.pi)) * self.num_bins).astype(int)
-                    bin_idx = np.clip(bin_idx, 0, self.num_bins - 1)
-                    np.add.at(bins, bin_idx.ravel(), cell_mag.ravel())
-                    histograms.append(bins)
-
-            descriptor = np.concatenate(histograms).astype(np.float32, copy=False)
-            norm = np.linalg.norm(descriptor)
+            pooled = patch.reshape(self.patch_size, self.window_size // self.patch_size, self.patch_size, self.window_size // self.patch_size)
+            pooled = pooled.mean(axis=3).mean(axis=1)
+            descriptor = pooled.reshape(-1)
+            descriptor -= float(descriptor.mean())
+            norm = float(np.linalg.norm(descriptor))
             if norm > 1e-6:
-                descriptor = descriptor / norm
-                descriptor = np.sqrt(descriptor)
-                norm = np.linalg.norm(descriptor)
-                if norm > 1e-6:
-                    descriptor /= norm
-
-            descriptors.append(descriptor)
+                descriptor /= norm
+            descriptors.append(descriptor.astype(np.float32))
             accepted_points.append((y, x))
 
         if not descriptors:
             return (
                 np.empty((0, 2), dtype=np.float32),
-                np.empty((0, descriptor_dim), dtype=np.float32),
+                np.empty((0, self.patch_size * self.patch_size), dtype=np.float32),
             )
 
         return (
@@ -203,8 +177,9 @@ class PatchDescriptorExtractor:
 def match_descriptors(
     descriptors_a: np.ndarray,
     descriptors_b: np.ndarray,
-    ratio: float = 0.8,
+    ratio: float = 0.72,
     require_consistency: bool = True,
+    max_distance: float | None = 0.40,
 ) -> np.ndarray:
     if descriptors_a.size == 0 or descriptors_b.size == 0:
         return np.empty((0, 2), dtype=np.int64)
@@ -252,15 +227,23 @@ def match_descriptors(
         axis=1,
     )
 
-    order_by_distance = np.argsort(best_dist[selected_indices])
-    return selected[order_by_distance].astype(np.int64, copy=False)
+    filtered_local = np.arange(selected_indices.shape[0])
+    if max_distance is not None:
+        mask = best_dist[selected_indices] <= max_distance
+        filtered_local = filtered_local[mask]
+
+    if filtered_local.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+
+    order_by_distance = np.argsort(best_dist[selected_indices][filtered_local])
+    return selected[filtered_local][order_by_distance].astype(np.int64, copy=False)
 
 
 # RANSAC based homography estimation
 @dataclass
 class RansacHomographyEstimator:
-    num_iterations: int = 4000
-    inlier_threshold: float = 2.0
+    num_iterations: int = 5000
+    inlier_threshold: float = 1.3
     random_seed: int = 42
 
     def estimate(self, points_a: PointArray, points_b: PointArray) -> Tuple[np.ndarray, CorrespondenceSet]:
@@ -272,6 +255,7 @@ class RansacHomographyEstimator:
         rng = np.random.default_rng(self.random_seed)
         best_inliers = None
         best_H = None
+        best_error = np.inf
 
         for _ in range(self.num_iterations):
             sample_idx = rng.choice(points_a.shape[0], size=4, replace=False)
@@ -286,9 +270,18 @@ class RansacHomographyEstimator:
             if inlier_count < 4:
                 continue
 
-            if best_inliers is None or inlier_count > int(np.sum(best_inliers)):
+            mean_error = float(errors[inliers].mean()) if inlier_count else np.inf
+            if (
+                best_inliers is None
+                or inlier_count > int(np.sum(best_inliers))
+                or (
+                    inlier_count == int(np.sum(best_inliers))
+                    and mean_error < best_error
+                )
+            ):
                 best_inliers = inliers
                 best_H = H_candidate
+                best_error = mean_error
 
         if best_inliers is None or best_H is None:
             raise RuntimeError("RANSAC failed to find a valid homography")

@@ -113,6 +113,12 @@
       <a class="nav-link sub" href="#a4-street">Street Panorama</a>
       <a class="nav-link sub" href="#a4-stairway">Stairway Panorama</a>
       <a class="nav-link sub" href="#a4-classroom">Classroom Panorama</a>
+      <div class="toc-section mt-3">Part B · Automatic Stitching</div>
+      <a class="nav-link" href="#partb-overview">Overview</a>
+      <a class="nav-link" href="#partb-corners">B.1 Corners</a>
+      <a class="nav-link" href="#partb-descriptors">B.2 Descriptors</a>
+      <a class="nav-link" href="#partb-matches">B.3 Matching</a>
+      <a class="nav-link" href="#partb-mosaics">B.4 Mosaics</a>
       <a class="nav-link" href="#reproduce">Reproducing Results</a>
       <a class="nav-link" href="#takeaways">Takeaways</a>
     </nav>
@@ -525,8 +531,231 @@
           </div>
         </div>
       </div>
+</section>
+
+
+
+
+
+    <section id="partb-overview" class="py-5 bg-light border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">Part B · Automatic Feature Pipeline</div>
+              <div class="bd">
+                <p class="text-muted">
+                  I reproduced the Brown et&nbsp;al. pipeline end-to-end: Harris corners with adaptive non-maximal suppression, 40×40 → 8×8 bias/gain-normalised patch descriptors, Lowe-style ratio matching with mutual agreement, and four-point RANSAC to recover homographies. Everything below was generated automatically and saved under <code>3b_deliverables/</code>; Part&nbsp;A (above) still showcases the hand-clicked correspondences.
+                </p>
+                <p class="text-muted mb-0">
+                  Each dataset was processed independently to stay memory-friendly. The artifacts include corner overlays (before/after ANMS), descriptor grids, correspondence visualisations, and automatic mosaics that can be compared against the manual mosaics from Part&nbsp;A.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
+    <section id="partb-corners" class="py-5">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">B.1 · Harris Corners with ANMS</div>
+              <div class="bd">
+                <p class="text-muted">For each reference image I plotted the strongest Harris responses and the ANMS-filtered subset. ANMS keeps the points spatially diverse while respecting corner strength.</p>
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <h6 class="fw-semibold text-muted text-center">Street</h6>
+                    <figure class="image-card mb-2">
+                      <img src="3b_deliverables/corners/street/corners_raw.png" alt="Street Harris corners" loading="lazy">
+                      <figcaption class="overlay-text">Top Harris responses</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/corners/street/corners_anms.png" alt="Street ANMS corners" loading="lazy">
+                      <figcaption class="overlay-text">After ANMS</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <h6 class="fw-semibold text-muted text-center">Stairway</h6>
+                    <figure class="image-card mb-2">
+                      <img src="3b_deliverables/corners/stairway/corners_raw.png" alt="Stairway Harris corners" loading="lazy">
+                      <figcaption class="overlay-text">Top Harris responses</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/corners/stairway/corners_anms.png" alt="Stairway ANMS corners" loading="lazy">
+                      <figcaption class="overlay-text">After ANMS</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <h6 class="fw-semibold text-muted text-center">Classroom</h6>
+                    <figure class="image-card mb-2">
+                      <img src="3b_deliverables/corners/classroom/corners_raw.png" alt="Classroom Harris corners" loading="lazy">
+                      <figcaption class="overlay-text">Top Harris responses</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/corners/classroom/corners_anms.png" alt="Classroom ANMS corners" loading="lazy">
+                      <figcaption class="overlay-text">After ANMS</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="partb-descriptors" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">B.2 · 40×40 → 8×8 Patch Descriptors</div>
+              <div class="bd">
+                <p class="text-muted">Each descriptor starts as a 40×40 window around the ANMS point, gets average-pooled down to 8×8, and is bias/gain-normalised. Below are 25 samples per dataset.</p>
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="3b_deliverables/descriptors/street/descriptor_grid.png" alt="Street descriptor grid" loading="lazy">
+                      <figcaption class="overlay-text">Street patches</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="3b_deliverables/descriptors/stairway/descriptor_grid.png" alt="Stairway descriptor grid" loading="lazy">
+                      <figcaption class="overlay-text">Stairway patches</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card">
+                      <img src="3b_deliverables/descriptors/classroom/descriptor_grid.png" alt="Classroom descriptor grid" loading="lazy">
+                      <figcaption class="overlay-text">Classroom patches</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="partb-matches" class="py-5">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">B.3 · Descriptor Matching with Lowe Ratio Test</div>
+              <div class="bd">
+                <p class="text-muted mb-3">Matches survive the 0.8 Lowe ratio test and a mutual-nearest check. Inliers from RANSAC are overlaid in the plots below.</p>
+                <div class="row g-4">
+                  <div class="col-md-4">
+                    <figure class="image-card mb-3">
+                      <img src="3b_deliverables/matches/street/street1_to_street2.png" alt="Street matches left" loading="lazy">
+                      <figcaption class="overlay-text">street1 → street2</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/matches/street/street3_to_street2.png" alt="Street matches right" loading="lazy">
+                      <figcaption class="overlay-text">street3 → street2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card mb-3">
+                      <img src="3b_deliverables/matches/stairway/stairway1_to_stairway2.png" alt="Stairway matches left" loading="lazy">
+                      <figcaption class="overlay-text">stairway1 → stairway2</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/matches/stairway/stairway3_to_stairway2.png" alt="Stairway matches right" loading="lazy">
+                      <figcaption class="overlay-text">stairway3 → stairway2</figcaption>
+                    </figure>
+                  </div>
+                  <div class="col-md-4">
+                    <figure class="image-card mb-3">
+                      <img src="3b_deliverables/matches/classroom/classroom1_to_classroom2.png" alt="Classroom matches left" loading="lazy">
+                      <figcaption class="overlay-text">classroom1 → classroom2</figcaption>
+                    </figure>
+                    <figure class="image-card">
+                      <img src="3b_deliverables/matches/classroom/classroom3_to_classroom2.png" alt="Classroom matches right" loading="lazy">
+                      <figcaption class="overlay-text">classroom3 → classroom2</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="partb-mosaics" class="py-5 bg-white border-top">
+      <div class="container">
+        <div class="row justify-content-center">
+          <div class="col-lg-9">
+            <div class="panel">
+              <div class="hd">B.4 · Automatic vs. Manual Mosaics</div>
+              <div class="bd">
+                <p class="text-muted">Automatic mosaics reuse the patch descriptors + RANSAC pipeline. Manual mosaics come from Part&nbsp;A. The comparison shows that the automatic matches recover essentially the same alignment.</p>
+                <div class="row gy-5">
+                  <div class="col-12">
+                    <h6 class="fw-semibold text-muted text-center mb-3">Street</h6>
+                    <div class="row g-4 justify-content-center">
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/street_automatic.png" alt="Street automatic mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Automatic</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/street_manual.png" alt="Street manual mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Manual (Part A)</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12">
+                    <h6 class="fw-semibold text-muted text-center mb-3">Stairway</h6>
+                    <div class="row g-4 justify-content-center">
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/stairway_automatic.png" alt="Stairway automatic mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Automatic</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/stairway_manual.png" alt="Stairway manual mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Manual (Part A)</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12">
+                    <h6 class="fw-semibold text-muted text-center mb-3">Classroom</h6>
+                    <div class="row g-4 justify-content-center">
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/classroom_automatic.png" alt="Classroom automatic mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Automatic</figcaption>
+                        </figure>
+                      </div>
+                      <div class="col-12 col-xl-5">
+                        <figure class="image-card">
+                          <img src="3b_deliverables/mosaics/classroom_manual.png" alt="Classroom manual mosaic" loading="lazy">
+                          <figcaption class="overlay-text">Manual (Part A)</figcaption>
+                        </figure>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
 
 
